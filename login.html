@@ -1,0 +1,212 @@
+<?php
+/*
+ * User Class
+ * This class is used for database related (connect, insert, and update) operations
+ * @author    CodexWorld.com
+ * @url        http://www.codexworld.com
+ * @license    http://www.codexworld.com/license
+ */
+
+class User {
+    private $dbHost     = "localhost";
+    private $dbUsername = "root";
+    private $dbPassword = "root";
+    private $dbName     = "codexworld";
+    private $userTbl    = 'users';
+    
+    function __construct(){
+        if(!isset($this->db)){
+            // Connect to the database
+            $conn = new mysqli($this->dbHost, $this->dbUsername, $this->dbPassword, $this->dbName);
+            if($conn->connect_error){
+                die("Failed to connect with MySQL: " . $conn->connect_error);
+            }else{
+                $this->db = $conn;
+            }
+        }
+    }
+    
+    function checkUser($userData = array()){
+        if(!empty($userData)){
+            // Check whether user data already exists in the database
+            $prevQuery = "SELECT * FROM ".$this->userTbl." WHERE oauth_provider = '".$userData['oauth_provider']."' AND oauth_uid = '".$userData['oauth_uid']."'";
+            $prevResult = $this->db->query($prevQuery);
+            if($prevResult->num_rows > 0){
+                // Update user data if already exists
+                $query = "UPDATE ".$this->userTbl." SET first_name = '".$userData['first_name']."', last_name = '".$userData['last_name']."', email = '".$userData['email']."', gender = '".$userData['gender']."', locale = '".$userData['locale']."', picture = '".$userData['picture']."', link = '".$userData['link']."', modified = NOW() WHERE oauth_provider = '".$userData['oauth_provider']."' AND oauth_uid = '".$userData['oauth_uid']."'";
+                $update = $this->db->query($query);
+            }else{
+                // Insert user data in the database
+                $query = "INSERT INTO ".$this->userTbl." SET oauth_provider = '".$userData['oauth_provider']."', oauth_uid = '".$userData['oauth_uid']."', first_name = '".$userData['first_name']."', last_name = '".$userData['last_name']."', email = '".$userData['email']."', gender = '".$userData['gender']."', locale = '".$userData['locale']."', picture = '".$userData['picture']."', link = '".$userData['link']."', created = NOW(), modified = NOW()";
+                $insert = $this->db->query($query);
+            }
+            
+            // Get user data from the database
+            $result = $this->db->query($prevQuery);
+            $userData = $result->fetch_assoc();
+        }
+        
+        // Return user data
+        return $userData;
+    }
+}
+<?php
+if(!session_id()){
+    session_start();
+}
+
+// Include Google API client library
+require_once 'google-api-php-client/Google_Client.php';
+require_once 'google-api-php-client/contrib/Google_Oauth2Service.php';
+
+/*
+ * Configuration and setup Google API
+ */
+$clientId = 'Google_Client_ID'; 
+$clientSecret = 'Google_Client_Secret'; 
+$redirectURL = 'http://localhost/login_with_google_using_php/'; //Callback URL
+
+// Call Google API
+$gClient = new Google_Client();
+$gClient->setApplicationName('Login to CodexWorld.com');
+$gClient->setClientId($clientId);
+$gClient->setClientSecret($clientSecret);
+$gClient->setRedirectUri($redirectURL);
+
+$google_oauthV2 = new Google_Oauth2Service($gClient);
+<?php
+// Include config file && User class
+require_once 'gpConfig.php';
+require_once 'User.class.php';
+
+if(isset($_GET['code'])){
+    $gClient->authenticate($_GET['code']);
+    $_SESSION['token'] = $gClient->getAccessToken();
+    header('Location: ' . filter_var($redirectURL, FILTER_SANITIZE_URL));
+}
+
+if(isset($_SESSION['token'])){
+    $gClient->setAccessToken($_SESSION['token']);
+}
+
+if($gClient->getAccessToken()){
+    // Get user profile data from google
+    $gpUserProfile = $google_oauthV2->userinfo->get();
+    
+    // Initialize User class
+    $user = new User();
+    
+    // Getting user profile info
+    $gpUserData = array();
+    $gpUserData['oauth_uid']  = !empty($gpUserProfile['id'])?$gpUserProfile['id']:'';
+    $gpUserData['first_name'] = !empty($gpUserProfile['given_name'])?$gpUserProfile['given_name']:'';
+    $gpUserData['last_name']  = !empty($gpUserProfile['family_name'])?$gpUserProfile['family_name']:'';
+    $gpUserData['email']      = !empty($gpUserProfile['email'])?$gpUserProfile['email']:'';
+    $gpUserData['gender']     = !empty($gpUserProfile['gender'])?$gpUserProfile['gender']:'';
+    $gpUserData['locale']     = !empty($gpUserProfile['locale'])?$gpUserProfile['locale']:'';
+    $gpUserData['picture']    = !empty($gpUserProfile['picture'])?$gpUserProfile['picture']:'';
+    $gpUserData['link']       = !empty($gpUserProfile['link'])?$gpUserProfile['link']:'';
+    
+    // Insert or update user data to the database
+    $gpUserData['oauth_provider'] = 'google';
+    $userData = $user->checkUser($gpUserData);
+    
+    // Storing user data in the session
+    $_SESSION['userData'] = $userData;
+    
+    // Render user profile data
+    if(!empty($userData)){
+        $output = '<h2>Google+ Profile Details </h2>';
+        $output .= '<img src="'.$userData['picture'].'">';
+        $output .= '<p>Google ID : ' . $userData['oauth_uid'].'</p>';
+        $output .= '<p>Name : ' . $userData['first_name'].' '.$userData['last_name'].'</p>';
+        $output .= '<p>Email : ' . $userData['email'].'</p>';
+        $output .= '<p>Gender : ' . $userData['gender'].'</p>';
+        $output .= '<p>Locale : ' . $userData['locale'].'</p>';
+        $output .= '<p>Logged in with : Google</p>';
+        $output .= '<p><a href="'.$userData['link'].'" target="_blank">Click to visit Google+</a></p>';
+        $output .= '<p>Logout from <a href="logout.php">Google</a></p>'; 
+    }else{
+        $output = '<h3 style="color:red">Some problem occurred, please try again.</h3>';
+    }
+}else{
+    // Get login url
+    $authUrl = $gClient->createAuthUrl();
+    
+    // Render google login button
+    $output = '<a href="'.filter_var($authUrl, FILTER_SANITIZE_URL).'"><img src="images/google-sign-in-btn.png" alt=""/></a>';
+}
+?>
+
+<div class="container">
+    <!-- Display login button / Google profile information -->
+    <?php echo $output; ?>
+</div>
+<?php
+// Include config file && User class
+require_once 'gpConfig.php';
+require_once 'User.class.php';
+
+if(isset($_GET['code'])){
+    $gClient->authenticate($_GET['code']);
+    $_SESSION['token'] = $gClient->getAccessToken();
+    header('Location: ' . filter_var($redirectURL, FILTER_SANITIZE_URL));
+}
+
+if(isset($_SESSION['token'])){
+    $gClient->setAccessToken($_SESSION['token']);
+}
+
+if($gClient->getAccessToken()){
+    // Get user profile data from google
+    $gpUserProfile = $google_oauthV2->userinfo->get();
+    
+    // Initialize User class
+    $user = new User();
+    
+    // Getting user profile info
+    $gpUserData = array();
+    $gpUserData['oauth_uid']  = !empty($gpUserProfile['id'])?$gpUserProfile['id']:'';
+    $gpUserData['first_name'] = !empty($gpUserProfile['given_name'])?$gpUserProfile['given_name']:'';
+    $gpUserData['last_name']  = !empty($gpUserProfile['family_name'])?$gpUserProfile['family_name']:'';
+    $gpUserData['email']      = !empty($gpUserProfile['email'])?$gpUserProfile['email']:'';
+    $gpUserData['gender']     = !empty($gpUserProfile['gender'])?$gpUserProfile['gender']:'';
+    $gpUserData['locale']     = !empty($gpUserProfile['locale'])?$gpUserProfile['locale']:'';
+    $gpUserData['picture']    = !empty($gpUserProfile['picture'])?$gpUserProfile['picture']:'';
+    $gpUserData['link']       = !empty($gpUserProfile['link'])?$gpUserProfile['link']:'';
+    
+    // Insert or update user data to the database
+    $gpUserData['oauth_provider'] = 'google';
+    $userData = $user->checkUser($gpUserData);
+    
+    // Storing user data in the session
+    $_SESSION['userData'] = $userData;
+    
+    // Render user profile data
+    if(!empty($userData)){
+        $output = '<h2>Google+ Profile Details </h2>';
+        $output .= '<img src="'.$userData['picture'].'">';
+        $output .= '<p>Google ID : ' . $userData['oauth_uid'].'</p>';
+        $output .= '<p>Name : ' . $userData['first_name'].' '.$userData['last_name'].'</p>';
+        $output .= '<p>Email : ' . $userData['email'].'</p>';
+        $output .= '<p>Gender : ' . $userData['gender'].'</p>';
+        $output .= '<p>Locale : ' . $userData['locale'].'</p>';
+        $output .= '<p>Logged in with : Google</p>';
+        $output .= '<p><a href="'.$userData['link'].'" target="_blank">Click to visit Google+</a></p>';
+        $output .= '<p>Logout from <a href="logout.php">Google</a></p>'; 
+    }else{
+        $output = '<h3 style="color:red">Some problem occurred, please try again.</h3>';
+    }
+}else{
+    // Get login url
+    $authUrl = $gClient->createAuthUrl();
+    
+    // Render google login button
+    $output = '<a href="'.filter_var($authUrl, FILTER_SANITIZE_URL).'"><img src="images/google-sign-in-btn.png" alt=""/></a>';
+}
+?>
+
+<div class="container">
+    <!-- Display login button / Google profile information -->
+    <?php echo $output; ?>
+</div>
